@@ -63,5 +63,24 @@ plt.bar(tnc_g.index, tnc_g['trips_pooled'])
 
 
 # Mapping
-ca = gpd.read_file('Boundaries_Community_Areas.geojson')
-ca
+cas = gpd.read_file('Boundaries_Community_Areas.geojson')
+# cas = cas.set_index('area_num_1')
+# tnc_trips = tnc_trips.set_index('pickup_community_area')
+cas['area_num_1'] = cas['area_num_1'].astype(int)
+
+tnc_trips = tnc_trips.merge(cas, how='left', left_on='pickup_community_area', right_on='area_num_1')
+tnc_trips_geo = gpd.GeoDataFrame(tnc_trips)
+tnc_trips_geo.head()
+
+geo_f = tnc_trips_geo[(tnc_trips_geo['trip_start_timestamp'].dt.year == 2019) & \
+                                    (tnc_trips_geo['trip_start_timestamp'].dt.month == 7) & \
+                                    (tnc_trips_geo['trip_start_timestamp'].dt.day == 15)]
+
+geo_fg = geo_f.dissolve(by='community', aggfunc='mean')
+
+
+
+fig, ax = plt.subplots(1, 1, figsize=(10,5))
+ax.axis('off')
+fig.suptitle('Mean Rideshare Fares from Origin Neighborhood')
+geo_fg.plot(column='fare', ax=ax, scheme='quantiles', cmap='Blues', legend=True, legend_kwds={'loc': 'lower left'})
