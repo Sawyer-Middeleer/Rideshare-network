@@ -11,9 +11,9 @@ working_directory = r'C:\Users\midde\OneDrive\Documents\UChicago Harris\Urban Ec
 
 endpoint = 'https://data.cityofchicago.org/resource/m6dm-c72p.csv'
 client = Socrata('data.cityofchicago.org',
-                 'g7JL0nhe6EdUFQOCY3bEG0kpo',
-                 username="sawyerm@uchicago.edu",
-                 password="Harukimurakami9!")
+                 '***********',
+                 username="************",
+                 password="*************")
 
 client.timeout = 50000
 

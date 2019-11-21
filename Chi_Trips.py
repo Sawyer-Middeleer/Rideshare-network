@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
+import geopandas as gpd
 import os
 import random
-import datetime
+import datetime as dt
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sodapy import Socrata
@@ -36,17 +37,31 @@ wd = os.getcwd()
 tnc_trips = pd.read_csv('chi_trips_sample.csv')
 cta_daily_entries = pd.read_csv('CTA_Station_Entries_Daily_Totals.csv')
 
-tnc_trips.head()
-cta_daily_entries.head()
-
 tnc_trips['trip_start_timestamp'] = pd.to_datetime(tnc_trips['trip_start_timestamp'])
 
 tnc_trips['fare'] = pd.to_numeric(tnc_trips['fare'], errors='coerce')
 tnc_trips = tnc_trips.dropna(subset=['fare'])
 tnc_trips['fare'] = tnc_trips['fare'].astype(int)
 
+tnc_trips['pickup_community_area'] = pd.to_numeric(tnc_trips['pickup_community_area'], errors='coerce')
+tnc_trips = tnc_trips.dropna(subset=['pickup_community_area'])
+tnc_trips['pickup_community_area'] = tnc_trips['pickup_community_area'].astype(int)
 
 # look at distributions of days, fares, frequencies of rides, etc.
 
 tnc_f = tnc_trips.loc[tnc_trips['fare'] <= 50] # only rides below $50
 sns.distplot(tnc_f['fare'], kde=False) # plot fares
+
+tnc_trips.columns
+
+len(tnc_trips.loc[tnc_trips['shared_trip_authorized'] == True]) / len(tnc_trips) # 22.7% of rides are shared
+# tnc_g  = tnc_trips.groupby([tnc_trips['trip_start_timestamp'].dt.dayofweek, tnc_trips['shared_trip_authorized']]).sum()
+
+tnc_g  = tnc_trips.groupby([tnc_trips['pickup_community_area']]).sum() # by community area
+plt.bar(tnc_g.index, tnc_g['trips_pooled'])
+
+
+
+# Mapping
+ca = gpd.read_file('Boundaries_Community_Areas.geojson')
+ca

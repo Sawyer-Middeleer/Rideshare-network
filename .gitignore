@@ -8,6 +8,7 @@ __pycache__/
 
 # other stuff
 *.csv
+*.geojson
 
 
 # Distribution / packaging
