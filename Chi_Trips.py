@@ -64,23 +64,29 @@ plt.bar(tnc_g.index, tnc_g['trips_pooled'])
 
 # Mapping
 cas = gpd.read_file('Boundaries_Community_Areas.geojson')
-# cas = cas.set_index('area_num_1')
-# tnc_trips = tnc_trips.set_index('pickup_community_area')
+
 cas['area_num_1'] = cas['area_num_1'].astype(int)
 
 tnc_trips = tnc_trips.merge(cas, how='left', left_on='pickup_community_area', right_on='area_num_1')
-tnc_trips_geo = gpd.GeoDataFrame(tnc_trips)
-tnc_trips_geo.head()
 
-geo_f = tnc_trips_geo[(tnc_trips_geo['trip_start_timestamp'].dt.year == 2019) & \
-                                    (tnc_trips_geo['trip_start_timestamp'].dt.month == 7) & \
-                                    (tnc_trips_geo['trip_start_timestamp'].dt.day == 15)]
+# calculate new columns (fare/median-income, tip/fare or something)
+# filter by time of day, group by day of week, etc
 
-geo_fg = geo_f.dissolve(by='community', aggfunc='mean')
+tnc_g = tnc_trips.groupby([tnc_trips['community']]).mean()
+
+tnc_trips_geo = gpd.GeoDataFrame(tnc_g.merge(cas))
+tnc_trips_geo.columns
 
 
 
-fig, ax = plt.subplots(1, 1, figsize=(10,5))
+
+fig, ax = plt.subplots(1, 1, figsize=(20,10))
 ax.axis('off')
-fig.suptitle('Mean Rideshare Fares from Origin Neighborhood')
-geo_fg.plot(column='fare', ax=ax, scheme='quantiles', cmap='Blues', legend=True, legend_kwds={'loc': 'lower left'})
+fig.suptitle('Mean Total Rideshare Fare Amount \n by Origin Neighborhood, 2018 - 2019',
+             fontsize='18')
+tnc_trips_geo.plot(column='trip_total',
+                   ax=ax, scheme='quantiles',
+                   cmap='Blues',
+                   edgecolor='gray',
+                   legend=True,
+                   legend_kwds={'loc': 'lower left'})
