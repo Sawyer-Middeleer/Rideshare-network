@@ -4,6 +4,7 @@ import geopandas as gpd
 import os
 import random
 import datetime as dt
+import re
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sodapy import Socrata
@@ -36,60 +37,47 @@ wd = os.getcwd()
 #
 # chi_trips.to_csv('chi_trips_sample.csv', index=False)
 
+# read data
 tnc_trips = pd.read_csv('chi_trips_sample.csv')
 cta_daily_entries = pd.read_csv('CTA_Station_Entries_Daily_Totals.csv')
 cca_data = pd.read_csv('ReferenceCCAProfiles20132017.csv')
-cca_data
-
-tnc_trips['trip_start_timestamp'] = pd.to_datetime(tnc_trips['trip_start_timestamp'])
-
-tnc_trips['fare'] = pd.to_numeric(tnc_trips['fare'], errors='coerce')
-tnc_trips = tnc_trips.dropna(subset=['fare'])
-tnc_trips['fare'] = tnc_trips['fare'].astype(float)
-
-tnc_trips['pickup_community_area'] = pd.to_numeric(tnc_trips['pickup_community_area'], errors='coerce')
-tnc_trips = tnc_trips.dropna(subset=['pickup_community_area'])
-tnc_trips['pickup_community_area'] = tnc_trips['pickup_community_area'].astype(int)
-
-tnc_trips['dropoff_community_area'] = pd.to_numeric(tnc_trips['dropoff_community_area'], errors='coerce')
-tnc_trips = tnc_trips.dropna(subset=['dropoff_community_area'])
-tnc_trips['dropoff_community_area'] = tnc_trips['dropoff_community_area'].astype(int)
-
-tnc_trips['tip'] = pd.to_numeric(tnc_trips['tip'], errors='coerce')
-tnc_trips = tnc_trips.dropna(subset=['dropoff_community_area'])
-tnc_trips['tip'] = tnc_trips['tip'].astype(float)
-
-tnc_trips['trip_total'] = pd.to_numeric(tnc_trips['trip_total'], errors='coerce')
-tnc_trips = tnc_trips.dropna(subset=['trip_total'])
-tnc_trips['trip_total'] = tnc_trips['trip_total'].astype(float)
-
-# look at distributions of days, fares, frequencies of rides, etc.
-
-tnc_f = tnc_trips.loc[tnc_trips['fare'] <= 50] # only rides below $50
-sns.distplot(tnc_f['fare'], kde=False) # plot fares
-
-tnc_trips.columns
-
-len(tnc_trips.loc[tnc_trips['shared_trip_authorized'] == True]) / len(tnc_trips) # 22.7% of rides are shared
-# tnc_g  = tnc_trips.groupby([tnc_trips['trip_start_timestamp'].dt.dayofweek, tnc_trips['shared_trip_authorized']]).sum()
-
-tnc_g  = tnc_trips.groupby([tnc_trips['pickup_community_area']]).sum() # by community area
-plt.bar(tnc_g.index, tnc_g['trips_pooled'])
-
-
-
-# Mapping
 cas = gpd.read_file('Boundaries_Community_Areas.geojson')
+cta_stations = gpd.read_file(r'C:\Users\midde\OneDrive\Documents\GitHub\Rideshare-network-analysis\CTA_RailStations\CTA_RailStations.shp')
 
 cas['area_num_1'] = cas['area_num_1'].astype(int)
-
 tnc_trips = tnc_trips.merge(cas, how='left', left_on='pickup_community_area', right_on='area_num_1')
 
-# calculate new columns (fare/median-income, tip/fare or something)
-# filter by time of day, group by day of week, etc
+
+list(cca_data.columns)
+cca_data[['GEOG', 'MEDINC']]
+
+# for counting convenience
+tnc_trips['dummy'] = 1
+
+# for time series analysis
+tnc_trips['trip_start_timestamp'] = pd.to_datetime(tnc_trips['trip_start_timestamp'])
+tnc_trips = tnc_trips.set_index('trip_start_timestamp')
+tnc_trips['year'] = tnc_trips.index.year
+tnc_trips['month'] = tnc_trips.index.month
+tnc_trips['day'] = tnc_trips.index.weekday_name
+tnc_trips['date'] = tnc_trips.index.date
+
+
+
+def fix_type(df, dict):
+    for key in dict:
+        df[key] = pd.to_numeric(df[key], errors='coerce')
+        df = df.dropna(subset=[key])
+        df[key] = df[key].astype(dict[key])
+    return df
+
+
 
 def delta(x, y):
-    return (y-x)/x
+    try:
+        return (y-x)/x
+    except:
+        pass
 
 def divide(x, y):
     try:
@@ -98,138 +86,138 @@ def divide(x, y):
         pass
 
 
-tnc_tip_prop = tnc_trips.groupby(['community']).apply(lambda x: len(x[x['tip'] > 0])/len(x))
-tnc_tip_prop = pd.DataFrame({'Proportion_Tipped': tnc_tip_prop})
-tnc_tip_prop = tnc_tip_prop.reset_index()
-tnc_tip_prop_geo = gpd.GeoDataFrame(tnc_tip_prop.merge(cas))
 
-fig, ax = plt.subplots(1, 1, figsize=(20,10))
-ax.axis('off')
-fig.suptitle('Proportion of Rides Tipped by Origin Community Area',
-             fontsize='18')
-tnc_tip_prop_geo.plot(column='Proportion_Tipped',
-                   ax=ax,
-                   scheme='quantiles',
-                   cmap='Blues',
-                   edgecolor='gray',
-                   legend=True,
-                   legend_kwds={'loc': 'lower left'})
+def basic_map(geo_df, variable, title):
+    fig, ax = plt.subplots(1, 1, figsize=(20,10))
+    ax.axis('off')
+    fig.suptitle(title,
+                 fontsize='18')
+    geo_df.plot(column=variable,
+            ax=ax,
+            scheme='quantiles',
+            cmap='Blues',
+            edgecolor='gray',
+            legend=True,
+            legend_kwds={'loc': 'lower left'})
 
 
 
-tnc_trips_19 = tnc_trips[tnc_trips['trip_start_timestamp'].dt.year == 2019]
+def resampled_chart(df, variable, title, start, end, t1='D', t2=None, t3=None, sum=False, mean=False):
+    if sum:
+        df1 = df[[variable]].resample(t1).sum()
+        if t2 is not None:
+            df2 = df[[variable]].resample(t2).sum()
+        if t3 is not None:
+            df3 = df[[variable]].resample(t3).sum()
+    elif mean:
+        df1 = df[[variable]].resample(t1).mean()
+        if t2 is not None:
+            df2 = df[[variable]].resample(t2).mean()
+        if t3 is not None:
+            df3 = df[[variable]].resample(t3).mean()
+    else:
+        return False
+
+    fig, ax = plt.subplots(1, 1, figsize=(20,10))
+
+    ax.plot(df1.loc[start:end, variable],
+    marker='.', linestyle='-', linewidth=0.5, label='{}'.format(t1))
+
+    if t2 is not None:
+        ax.plot(df2.loc[start:end, variable],
+        marker='o', markersize=8, linewidth=0.75, linestyle='-', label='{}'.format(t2))
+    if t3 is not None:
+        ax.plot(df3.loc[start:end, variable],
+        marker='s', markersize=8, linestyle='-', label='{}'.format(t3))
+
+    ax.set_ylabel(title)
+    ax.legend();
+
+
+vars_to_fix = {'fare': int,
+               'trip_total': int,
+               'tip': float,
+               'pickup_community_area': int,
+               'dropoff_community_area': int,
+               }
+
+tnc_trips = fix_type(tnc_trips, vars_to_fix)
+
+# new variables
+tnc_trips['price_per_mile'] = np.divide(tnc_trips['trip_total'], tnc_trips['trip_miles'])
+tnc_trips = tnc_trips.loc[tnc_trips['price_per_mile'] < 50]
+
+# Some quick charts
+
+tnc_f = tnc_trips.loc[tnc_trips['fare'] <= 50] # only rides below $50
+sns.distplot(tnc_f['fare'], kde=False) # plot fares
+
+len(tnc_trips.loc[tnc_trips['shared_trip_authorized'] == True]) / len(tnc_trips) # 22.7% of rides are shared
+
+
+# Mapping
+
+# fares
+tnc_trips_19 = tnc_trips[tnc_trips['year'] == 2019]
 tnc_fares = tnc_trips_19.groupby([tnc_trips_19['community']]).mean()
-
 tnc_fares_geo = gpd.GeoDataFrame(tnc_fares.merge(cas))
+basic_map(tnc_fares_geo, 'trip_total', 'Mean Total Rideshare Fare Amount \n by Origin Neighborhood, 2019')
 
-fig, ax = plt.subplots(1, 1, figsize=(20,10))
-ax.axis('off')
-fig.suptitle('Mean Total Rideshare Fare Amount \n by Origin Neighborhood, 2019',
-             fontsize='18')
-tnc_fares_geo.plot(column='trip_total',
-                   ax=ax,
-                   scheme='quantiles',
-                   cmap='Blues',
-                   edgecolor='gray',
-                   legend=True,
-                   legend_kwds={'loc': 'lower left'})
+# trips
+tnc_trips_19 = tnc_trips[tnc_trips['year'] == 2019]
+tnc_trips_1909 = tnc_trips_19[tnc_trips_19['month'] == 9]
+tnc_trips_1909 = tnc_trips_1909.groupby([tnc_trips_1909['community']]).sum()
+tnc_trips_geo = gpd.GeoDataFrame(tnc_trips_1909.reset_index().merge(cas, on='community'))
+tnc_trips_geo
+basic_map(tnc_trips_geo, 'dummy', 'Total TNC Rides, Sept. 2019')
 
-list(cca_data.columns)
-cca_data[['DROVE_AL', 'CARPOOL', 'TRANSIT', 'WALK_BIKE', 'COMM_OTHER']]
-
-
-# time series analysis
-tnc_trips = tnc_trips.set_index('trip_start_timestamp')
-tnc_trips['year'] = tnc_trips.index.year
-tnc_trips['month'] = tnc_trips.index.month
-tnc_trips['day'] = tnc_trips.index.weekday_name
-tnc_trips['date'] = tnc_trips.index.date
-
+# filter by time of day, group by day of week, etc
 # Map change in tnc ridership by community area over time (11-2018 - 9-2019)
-tnc_trips['dummy'] = 1
-# daily, weekly, monthly rides numbers
-
-tnc_trips_daily = tnc_trips[['dummy']].resample('D').sum()
-tnc_trips_weekly = tnc_trips[['dummy']].resample('W').sum()
-tnc_trips_monthly = tnc_trips[['dummy']].resample('M').sum()
-
-start, end = '2018-11-01', '2019-09-30'
-
-fig, ax = plt.subplots(1, 1, figsize=(20,10))
-ax.plot(tnc_trips_daily.loc[start:end, 'dummy'],
-marker='.', linestyle='-', linewidth=0.5, label='Daily Rides')
-ax.plot(tnc_trips_weekly.loc[start:end, 'dummy'],
-marker='o', markersize=8, linestyle='-', label='Weekly Rides')
-ax.plot(tnc_trips_monthly.loc[start:end, 'dummy'],
-marker='s', markersize=8, linestyle='-', label='Monthly Rides')
-ax.set_ylabel('Number of Rides')
-ax.legend();
-
-# daily, weekly, monthly average price
-
-tnc_price_daily = tnc_trips[['trip_total']].resample('D').mean()
-tnc_price_weekly = tnc_trips[['trip_total']].resample('W').mean()
-tnc_price_monthly = tnc_trips[['trip_total']].resample('M').mean()
-
-start, end = '2018-11-01', '2019-09-30'
-
-fig, ax = plt.subplots(1, 1, figsize=(20,10))
-ax.plot(tnc_price_daily.loc[start:end, 'trip_total'],
-marker='.', linestyle='-', linewidth=0.5, label='Daily Ride Prices')
-ax.plot(tnc_price_weekly.loc[start:end, 'trip_total'],
-marker='o', markersize=8, linestyle='-', label='Weekly Ride Prices')
-ax.plot(tnc_price_monthly.loc[start:end, 'trip_total'],
-marker='s', markersize=8, linestyle='-', label='Monthly Ride Prices')
-ax.set_ylabel('Average Ride Price')
-ax.legend();
-
-# daily, weekly, monthly average distance
-
-tnc_dist_daily = tnc_trips[['trip_miles']].resample('D').mean()
-tnc_dist_weekly = tnc_trips[['trip_miles']].resample('W').mean()
-tnc_dist_monthly = tnc_trips[['trip_miles']].resample('M').mean()
-
-start, end = '2018-11-01', '2019-09-30'
-
-fig, ax = plt.subplots(1, 1, figsize=(20,10))
-ax.plot(tnc_dist_daily.loc[start:end, 'trip_miles'],
-marker='.', linestyle='-', linewidth=0.5, label='Daily Ride Distance')
-ax.plot(tnc_dist_weekly.loc[start:end, 'trip_miles'],
-marker='o', markersize=8, linestyle='-', label='Weekly Ride Distance')
-ax.plot(tnc_dist_monthly.loc[start:end, 'trip_miles'],
-marker='s', markersize=8, linestyle='-', label='Monthly Ride Distance')
-ax.set_ylabel('Average Ride Distance (miles)')
-ax.legend();
-
-# daily, weekly, monthly average time
-
-tnc_dur_daily = tnc_trips[['trip_seconds']].resample('D').mean()
-tnc_dur_weekly = tnc_trips[['trip_seconds']].resample('W').mean()
-tnc_dur_monthly = tnc_trips[['trip_seconds']].resample('M').mean()
-
-start, end = '2018-11-01', '2019-09-30'
-
-fig, ax = plt.subplots(1, 1, figsize=(20,10))
-ax.plot(tnc_dur_daily.loc[start:end, 'trip_seconds'],
-marker='.', linestyle='-', linewidth=0.5, label='Daily Ride Duration')
-ax.plot(tnc_dur_weekly.loc[start:end, 'trip_seconds'],
-marker='o', markersize=8, linestyle='-', label='Weekly Ride Duration')
-ax.plot(tnc_dur_monthly.loc[start:end, 'trip_seconds'],
-marker='s', markersize=8, linestyle='-', label='Monthly Ride Duration')
-ax.set_ylabel('Average Ride Duration (seconds)')
-ax.legend();
+# share pooled by community area
 
 
-# DO PRICE PER MILE OR PRICE PER SECOND
+# charts
+resampled_chart(tnc_trips, 'dummy', 'Number of Rides', '2018-11', '2019-09-01', t1='H', t2='D', t3='W', sum=True)
+resampled_chart(tnc_trips, 'trip_total', 'Average Prices', '2018-11', '2019-09', t1='D', t2='W', t3='M', mean=True)
+resampled_chart(tnc_trips, 'trip_miles', 'Average Ride Distance (miles)', '2018-11', '2019-09', t1='D', t2='W', t3='M', mean=True)
+resampled_chart(tnc_trips, 'price_per_mile', 'Average Ride Price Per Mile', '2018-11', '2019-09', t1='D', t2='W', t3='M', mean=True)
+
+cta_daily_entries['station_id'] = cta_daily_entries['station_id'].astype('str')
+cta_daily_entries['station_id'] = cta_daily_entries['station_id'].map(lambda x: re.sub('(^40+|^4)', '', x))
+cta_daily_entries['station_id'] = cta_daily_entries['station_id'].astype('int')
+
+cta_daily_entries['date'] = pd.to_datetime(cta_daily_entries['date'])
+cta_daily_entries['date'] = cta_daily_entries['date'] + pd.to_timedelta(cta_daily_entries.groupby('date').cumcount(), unit='s')
+cta_daily_entries = cta_daily_entries.set_index('date')
+
+cta_daily_entries['year'] = cta_daily_entries.index.year
+cta_daily_entries['month'] = cta_daily_entries.index.month
+cta_daily_entries['day'] = cta_daily_entries.index.weekday_name
+cta_daily_entries['date'] = cta_daily_entries.index.date
 
 
-#### https://www.dataquest.io/blog/tutorial-time-series-analysis-with-pandas/
-# Map average month-over-month ridership by community area
-# Graph average rides/week and # take transit
+cta_stations = cta_stations.to_crs({'init': 'epsg:4326'})
+cca_with_stations = gpd.sjoin(cas, cta_stations, how="left", op='intersects')
+cca_with_stations = cca_with_stations.dropna()
+
+cca_with_stations = cca_with_stations.rename(columns={'STATION_ID':'station_id'})
+cca_with_stations['station_id'] = cca_with_stations['station_id'].astype('int')
 
 
+list(cca_with_stations['station_id'].unique())
+list(cta_daily_entries['station_id'].unique())
 
+cta_cca_merged = pd.merge(cta_daily_entries, cca_with_stations, how='left')
+
+# !!!!
+# 1) Graph average rides/week and # take transit
+# 2) maps of cta stuff and comparisons
+# 3) avg % change in weekly ridership for nov 2018 vs sept 2019 by commuity area
+# regress all the controll variables (med inc, pct nonwhite, etc.)
+
+# margaret
 # Graph %change in weekly tnc rides and %change in community cta boardings
-
 # Filter (all?) 2 by top and bottom 20% income neighborhoods
+
+
 #
