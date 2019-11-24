@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sodapy import Socrata
 from urllib.request import Request, urlopen
+from numpy.polynomial.polynomial import polyfit
 
 wd = os.getcwd()
 
@@ -208,7 +209,32 @@ list(cca_with_stations['station_id'].unique())
 list(cta_daily_entries['station_id'].unique())
 
 cta_cca_merged = pd.merge(cta_daily_entries, cca_with_stations, how='left')
+cta_cca_merged = cta_cca_merged.dropna()
+cta_cca_merged['rides'] = cta_cca_merged['rides'].apply(lambda x: x.replace(',', ''))
+cta_cca_merged[['rides', 'area_numbe', 'area_num_1', 'comarea_id']] = cta_cca_merged[['rides', 'area_numbe', 'area_num_1', 'comarea_id']].astype(int)
 
+cta_cca_19 = cta_cca_merged.loc[cta_cca_merged.year == 2019]
+cta_cca_19 = cta_cca_19.groupby(['community']).sum()
+cta_cca_19_geo = gpd.GeoDataFrame(cta_cca_19.reset_index().merge(cas, how='left', on='community'))
+
+tnc_trips_19 = tnc_trips_19.groupby(['community']).sum()
+
+cta_cca_19 = cta_cca_19.merge(tnc_trips_19, how='left', on='community')
+cta_cca_19 = pd.DataFrame(cta_cca_19)
+
+
+b, m = polyfit(cta_cca_19['rides'], cta_cca_19['dummy'], 1)
+plt.scatter(cta_cca_19['rides'], cta_cca_19['dummy'])
+plt.plot(cta_cca_19['rides'], b + m * cta_cca_19['rides'], '-')
+
+
+
+cta_cca_merged['date'] = pd.to_datetime(cta_cca_merged['date'])
+cta_cca_merged = cta_cca_merged.set_index('date')
+cta_cca_merged = cta_cca_merged.groupby(['date']).sum()
+
+
+# cta_cca_merged.to_csv('cta_cca_merged.csv', index=False)
 # !!!!
 # 1) Graph average rides/week and # take transit
 # 2) maps of cta stuff and comparisons
@@ -218,6 +244,3 @@ cta_cca_merged = pd.merge(cta_daily_entries, cca_with_stations, how='left')
 # margaret
 # Graph %change in weekly tnc rides and %change in community cta boardings
 # Filter (all?) 2 by top and bottom 20% income neighborhoods
-
-
-#
